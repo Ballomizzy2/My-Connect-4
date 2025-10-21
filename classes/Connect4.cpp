@@ -69,17 +69,7 @@ bool Connect4::actionForEmptyHolder(BitHolder &holder) {
     appropriateHolder->setBit(piece);
     lastBitCreated = piece;
 
-    //handle connections
-    std::unordered_set<ChessSquare*> setOfSquares = _grid->getImmediateSurrounding(c->getColumn(), c->getRow());
-    //check through set for similarity in color as current chess square
-    if(!setOfSquares.empty())
-    {
-        for (ChessSquare* potential : setOfSquares)
-        {
-            if (potential && potential->gameTag() == currPlayerNum)
-                _grid->addConnection(c->getColumn(), c->getRow(), potential->getColumn(), potential->getRow());
-        }
-    }    
+    // No need to handle connections here anymore as we check for winning lines directly
     endTurn();
     return false; // Checkers doesn't place new pieces
 }
@@ -224,14 +214,11 @@ bool Connect4::hasJumpAvailable(Player* player) const {
 Player* Connect4::checkForWinner() {
     ChessSquare* currentHolder = (ChessSquare*)lastBitCreated->getHolder();
     
-    // also check afdter adding connections, getconnections.size >= 4, stop game and win cuurent player
-    if(_grid->getConnectedSquares(currentHolder->getColumn(), currentHolder->getRow()).size() >= 3)
-    {
-        //stopGame();
-        //Player* current = getCurrentPlayer();   
+    // Check for winning lines in any direction
+    auto connectedSquares = _grid->getConnectedSquares(currentHolder->getColumn(), currentHolder->getRow());
+    if (!connectedSquares.empty()) {
         return getPlayerAt(!(getCurrentTurnNo()%2));
     }
-    //stopGame();
     return nullptr;
 }
 
@@ -281,5 +268,199 @@ void Connect4::setStateString(const std::string &s) {
     });
 }
 
-void Connect4::updateAI() {}
+void Connect4::updateAI() {
+    // Constants for alpha-beta algorithm
+    const int MAX_DEPTH = 6;
+    const int INFINITY_SCORE = 1000000;
+
+    // Helper function to evaluate a line of 4 squares
+    auto evaluateLine = [this](std::vector<ChessSquare*>& line) -> int {
+        int aiCount = 0;
+        int playerCount = 0;
+        int empty = 0;
+        
+        for (ChessSquare* square : line) {
+            if (!square || !square->bit()) {
+                empty++;
+            } else {
+                if (square->gameTag() == getCurrentPlayer()->playerNumber()) {
+                    aiCount++;
+                } else {
+                    playerCount++;
+                }
+            }
+        }
+        
+        // If both players have pieces in the line, it's not valuable
+        if (aiCount > 0 && playerCount > 0) return 0;
+        
+        // Score based on number of pieces
+        auto getScore = [](int count, int empty) -> int {
+            switch(count) {
+                case 4: return 1000000;  // Winning position
+                case 3: return empty > 0 ? 100 : 0;  // Three in a row with space
+                case 2: return empty > 1 ? 10 : 0;   // Two in a row with spaces
+                case 1: return empty > 2 ? 1 : 0;    // One with spaces
+                default: return 0;
+            }
+        };
+        
+        if (aiCount > 0) return getScore(aiCount, empty);
+        if (playerCount > 0) return -getScore(playerCount, empty);
+        return 0;
+    };
+
+    // Get all possible lines of 4 squares
+    auto getAllLines = [this]() -> std::vector<std::vector<ChessSquare*>> {
+        std::vector<std::vector<ChessSquare*>> lines;
+        
+        // Horizontal lines
+        for (int y = 0; y < _grid->getHeight(); y++) {
+            for (int x = 0; x <= _grid->getWidth() - 4; x++) {
+                std::vector<ChessSquare*> line;
+                for (int i = 0; i < 4; i++) {
+                    line.push_back(_grid->getSquare(x + i, y));
+                }
+                lines.push_back(line);
+            }
+        }
+        
+        // Vertical lines
+        for (int x = 0; x < _grid->getWidth(); x++) {
+            for (int y = 0; y <= _grid->getHeight() - 4; y++) {
+                std::vector<ChessSquare*> line;
+                for (int i = 0; i < 4; i++) {
+                    line.push_back(_grid->getSquare(x, y + i));
+                }
+                lines.push_back(line);
+            }
+        }
+        
+        // Diagonal lines (bottom-left to top-right)
+        for (int y = 3; y < _grid->getHeight(); y++) {
+            for (int x = 0; x <= _grid->getWidth() - 4; x++) {
+                std::vector<ChessSquare*> line;
+                for (int i = 0; i < 4; i++) {
+                    line.push_back(_grid->getSquare(x + i, y - i));
+                }
+                lines.push_back(line);
+            }
+        }
+        
+        // Diagonal lines (top-left to bottom-right)
+        for (int y = 0; y <= _grid->getHeight() - 4; y++) {
+            for (int x = 0; x <= _grid->getWidth() - 4; x++) {
+                std::vector<ChessSquare*> line;
+                for (int i = 0; i < 4; i++) {
+                    line.push_back(_grid->getSquare(x + i, y + i));
+                }
+                lines.push_back(line);
+            }
+        }
+        
+        return lines;
+    };
+
+    // Evaluate current board position
+    auto evaluatePosition = [&]() -> int {
+        int score = 0;
+        auto lines = getAllLines();
+        for (auto& line : lines) {
+            score += evaluateLine(line);
+        }
+        return score;
+    };
+
+    // Make temporary move
+    auto makeTemporaryMove = [this](int column, int playerNum) -> bool {
+        for (int y = _grid->getHeight() - 1; y >= 0; y--) {
+            ChessSquare* square = _grid->getSquare(column, y);
+            if (square && !square->bit()) {
+                square->setGameTag(playerNum);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Undo temporary move
+    auto undoTemporaryMove = [this](int column) {
+        for (int y = 0; y < _grid->getHeight(); y++) {
+            ChessSquare* square = _grid->getSquare(column, y);
+            if (square && square->gameTag() != -1) {
+                square->setGameTag(-1);
+                break;
+            }
+        }
+    };
+
+    // Get valid moves
+    auto getValidMoves = [this]() -> std::vector<int> {
+        std::vector<int> moves;
+        for (int x = 0; x < _grid->getWidth(); x++) {
+            if (!_grid->getSquare(x, 0)->bit()) {
+                moves.push_back(x);
+            }
+        }
+        return moves;
+    };
+
+    // Alpha-beta algorithm
+    std::function<int(int, int, int, bool)> alphaBeta = [&](int depth, int alpha, int beta, bool maximizingPlayer) -> int {
+        if (depth == 0) return evaluatePosition();
+        
+        auto validMoves = getValidMoves();
+        if (validMoves.empty()) return 0;
+        
+        if (maximizingPlayer) {
+            int maxEval = -INFINITY_SCORE;
+            for (int column : validMoves) {
+                if (makeTemporaryMove(column, getCurrentPlayer()->playerNumber())) {
+                    int eval = alphaBeta(depth - 1, alpha, beta, false);
+                    undoTemporaryMove(column);
+                    maxEval = std::max(maxEval, eval);
+                    alpha = std::max(alpha, eval);
+                    if (beta <= alpha) break;
+                }
+            }
+            return maxEval;
+        } else {
+            int minEval = INFINITY_SCORE;
+            for (int column : validMoves) {
+                if (makeTemporaryMove(column, !getCurrentPlayer()->playerNumber())) {
+                    int eval = alphaBeta(depth - 1, alpha, beta, true);
+                    undoTemporaryMove(column);
+                    minEval = std::min(minEval, eval);
+                    beta = std::min(beta, eval);
+                    if (beta <= alpha) break;
+                }
+            }
+            return minEval;
+        }
+    };
+
+    // Find and make the best move
+    auto validMoves = getValidMoves();
+    int bestMove = validMoves[0];
+    int bestScore = -INFINITY_SCORE;
+    bool isMaximizingPlayer = true;
+    
+    for (int column : validMoves) {
+        if (makeTemporaryMove(column, getCurrentPlayer()->playerNumber())) {
+            int score = alphaBeta(MAX_DEPTH - 1, -INFINITY_SCORE, INFINITY_SCORE, !isMaximizingPlayer);
+            undoTemporaryMove(column);
+            
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = column;
+            }
+        }
+    }
+    
+    // Make the best move
+    BitHolder* holder = _grid->getSquare(bestMove, 0);
+    if (holder) {
+        actionForEmptyHolder(*holder);
+    }
+}
 

@@ -166,13 +166,76 @@ void Grid::addConnection(int fromX, int fromY, int toX, int toY)
 std::vector<ChessSquare*> Grid::getConnectedSquares(int x, int y)
 {
     std::vector<ChessSquare*> connected;
-    int index = getIndex(x, y);
+    int gameTag = getSquare(x, y)->gameTag();
+    
+    // Check horizontal (left to right)
+    int count = 0;
+    for (int dx = -3; dx <= 3; dx++) {
+        if (isValid(x + dx, y)) {
+            ChessSquare* square = getSquare(x + dx, y);
+            if (square && square->gameTag() == gameTag) {
+                count++;
+                if (count >= 4) {
+                    // Found 4 in a row horizontally
+                    return std::vector<ChessSquare*>{square, getSquare(x + dx - 1, y),
+                                                   getSquare(x + dx - 2, y), getSquare(x + dx - 3, y)};
+                }
+            } else {
+                count = 0;
+            }
+        }
+    }
 
-    if (_connections.find(index) != _connections.end()) {
-        for (int connectedIndex : _connections[index]) {
-            ChessSquare* square = getSquareByIndex(connectedIndex);
-            if (square) {
-                connected.push_back(square);
+    // Check vertical (bottom to top)
+    count = 0;
+    for (int dy = -3; dy <= 3; dy++) {
+        if (isValid(x, y + dy)) {
+            ChessSquare* square = getSquare(x, y + dy);
+            if (square && square->gameTag() == gameTag) {
+                count++;
+                if (count >= 4) {
+                    // Found 4 in a row vertically
+                    return std::vector<ChessSquare*>{square, getSquare(x, y + dy - 1),
+                                                   getSquare(x, y + dy - 2), getSquare(x, y + dy - 3)};
+                }
+            } else {
+                count = 0;
+            }
+        }
+    }
+
+    // Check diagonal (bottom-left to top-right)
+    count = 0;
+    for (int d = -3; d <= 3; d++) {
+        if (isValid(x + d, y + d)) {
+            ChessSquare* square = getSquare(x + d, y + d);
+            if (square && square->gameTag() == gameTag) {
+                count++;
+                if (count >= 4) {
+                    // Found 4 in a row diagonally
+                    return std::vector<ChessSquare*>{square, getSquare(x + d - 1, y + d - 1),
+                                                   getSquare(x + d - 2, y + d - 2), getSquare(x + d - 3, y + d - 3)};
+                }
+            } else {
+                count = 0;
+            }
+        }
+    }
+
+    // Check diagonal (top-left to bottom-right)
+    count = 0;
+    for (int d = -3; d <= 3; d++) {
+        if (isValid(x + d, y - d)) {
+            ChessSquare* square = getSquare(x + d, y - d);
+            if (square && square->gameTag() == gameTag) {
+                count++;
+                if (count >= 4) {
+                    // Found 4 in a row diagonally
+                    return std::vector<ChessSquare*>{square, getSquare(x + d - 1, y - d + 1),
+                                                   getSquare(x + d - 2, y - d + 2), getSquare(x + d - 3, y - d + 3)};
+                }
+            } else {
+                count = 0;
             }
         }
     }
